@@ -1,26 +1,30 @@
 import type { Plugin, AuthHook } from "@opencode-ai/plugin"
+import { execSync } from "node:child_process"
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import { dirname, join } from "node:path"
 import { readClaudeCredentials, type ClaudeCredentials } from "./keychain.js"
 
-const ANTHROPIC_REFRESH_URL = "https://platform.claude.com/v1/oauth/token"
-
-async function tryRefreshToken(currentRefreshToken: string): Promise<ClaudeCredentials | null> {
+async function refreshViaCli(): Promise<void> {
   try {
-    const response = await fetch(ANTHROPIC_REFRESH_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ grant_type: "refresh_token", refresh_token: currentRefreshToken }),
+    execSync("claude -p . --model claude-haiku-4-5-20250514", {
+      timeout: 60_000,
+      encoding: "utf-8",
+      env: { ...process.env, TERM: "dumb" },
+      stdio: "ignore",
     })
-    if (!response.ok) return null
-    const data = (await response.json()) as Record<string, unknown>
-    const access = data.access_token ?? data.accessToken
-    const refresh = data.refresh_token ?? data.refreshToken
-    const expiresIn = data.expires_in
-    if (typeof access !== "string" || typeof refresh !== "string") return null
-    const expiresAt =
-      typeof expiresIn === "number" ? Date.now() + expiresIn * 1000 : Date.now() + 3600 * 1000
-    return { accessToken: access, refreshToken: refresh, expiresAt }
   } catch {
-    return null
+    // Non-fatal: Claude CLI may not be available or may fail
+  }
+}
+
+function loadSessionPrompt(): string {
+  try {
+    const __dirname = dirname(fileURLToPath(import.meta.url))
+    const promptPath = join(__dirname, "anthropic-prompt.txt")
+    return readFileSync(promptPath, "utf-8")
+  } catch {
+    return "You are Claude Code, Anthropic's official CLI for Claude."
   }
 }
 
@@ -31,18 +35,16 @@ function createAuthFetch(
   let current = initial
 
   return async (pluginFetchInput, init): Promise<Response> => {
-    // Check expiry with 60-second buffer
     if (current.expiresAt < Date.now() + 60_000) {
-      // Re-read keychain first — Claude Code may have refreshed the token
       const fresh = readClaudeCredentials()
       if (fresh && fresh.expiresAt > Date.now() + 60_000) {
         current = fresh
         onRefresh(current)
       } else {
-        // Keychain also stale — try OAuth refresh
-        const refreshed = await tryRefreshToken(current.refreshToken)
-        if (refreshed) {
-          current = refreshed
+        await refreshViaCli()
+        const afterRefresh = readClaudeCredentials()
+        if (afterRefresh && afterRefresh.expiresAt > Date.now() + 60_000) {
+          current = afterRefresh
           onRefresh(current)
         } else {
           throw new Error(
@@ -60,17 +62,18 @@ function createAuthFetch(
 }
 
 const plugin: Plugin = async (input) => {
-  if (process.platform !== "darwin") {
+  const creds = readClaudeCredentials()
+  if (!creds) {
     return {}
   }
 
   const auth: AuthHook = {
     provider: "anthropic",
     loader: async (_getAuth, _provider) => {
-      const creds = readClaudeCredentials()
-      if (!creds) {
+      const initialCreds = readClaudeCredentials()
+      if (!initialCreds) {
         throw new Error(
-          "opencode-claude-auth: Claude Code credentials not found in macOS Keychain. " +
+          "opencode-claude-auth: Claude Code credentials not found. " +
             "Please authenticate with Claude Code first by running `claude` in your terminal.",
         )
       }
@@ -79,16 +82,15 @@ const plugin: Plugin = async (input) => {
         path: { id: "anthropic" },
         body: {
           type: "oauth",
-          access: creds.accessToken,
-          refresh: creds.refreshToken,
-          expires: creds.expiresAt,
+          access: initialCreds.accessToken,
+          refresh: initialCreds.refreshToken,
+          expires: initialCreds.expiresAt,
         },
       })
 
       return {
         apiKey: "oauth",
-        fetch: createAuthFetch(creds, (updated) => {
-          // Fire-and-forget: persist refreshed token; non-fatal if this fails
+        fetch: createAuthFetch(initialCreds, (updated) => {
           void input.client.auth.set({
             path: { id: "anthropic" },
             body: {
@@ -104,7 +106,14 @@ const plugin: Plugin = async (input) => {
     methods: [] as AuthHook["methods"],
   }
 
-  return { auth }
+  return {
+    auth,
+    async "experimental.chat.system.transform"(hookInput, output) {
+      if (hookInput.model?.providerID !== "anthropic") return
+      const prompt = loadSessionPrompt()
+      output.system.unshift(prompt)
+    },
+  }
 }
 
 export default plugin

@@ -1,4 +1,7 @@
 import { execSync } from "node:child_process"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { homedir } from "node:os"
 
 export interface ClaudeCredentials {
   accessToken: string
@@ -6,17 +9,37 @@ export interface ClaudeCredentials {
   expiresAt: number
 }
 
-// Service name used by Claude Code to store credentials in macOS Keychain
 const SERVICE_NAME = "Claude Code-credentials"
 
-/**
- * Reads Claude Code OAuth credentials from macOS Keychain.
- * Returns null on non-macOS or when credentials are not found.
- * Throws with descriptive errors for other failure cases.
- */
+function readCredentialsFile(): ClaudeCredentials | null {
+  try {
+    const credPath = join(homedir(), ".claude", ".credentials.json")
+    const raw = readFileSync(credPath, "utf-8")
+    const parsed = JSON.parse(raw) as { claudeAiOauth?: Record<string, unknown> }
+    const data = parsed.claudeAiOauth ?? parsed
+    const creds = data as { accessToken?: unknown; refreshToken?: unknown; expiresAt?: unknown }
+
+    if (
+      typeof creds.accessToken !== "string" ||
+      typeof creds.refreshToken !== "string" ||
+      typeof creds.expiresAt !== "number"
+    ) {
+      return null
+    }
+
+    return {
+      accessToken: creds.accessToken,
+      refreshToken: creds.refreshToken,
+      expiresAt: creds.expiresAt,
+    }
+  } catch {
+    return null
+  }
+}
+
 export function readClaudeCredentials(): ClaudeCredentials | null {
   if (process.platform !== "darwin") {
-    return null
+    return readCredentialsFile()
   }
 
   let raw: string
@@ -35,8 +58,7 @@ export function readClaudeCredentials(): ClaudeCredentials | null {
     }
 
     if (error.status === 44) {
-      // Entry not found — return null so OpenCode can try other auth methods
-      return null
+      return readCredentialsFile()
     }
 
     if (error.status === 36) {
@@ -65,12 +87,7 @@ export function readClaudeCredentials(): ClaudeCredentials | null {
     )
   }
 
-  // Handle both nested and flat formats:
-  // Nested (newer): { "claudeAiOauth": { "accessToken": ..., "refreshToken": ..., "expiresAt": ... } }
-  // Flat (older):   { "accessToken": ..., "refreshToken": ..., "expiresAt": ... }
-  const data =
-    (parsed as { claudeAiOauth?: unknown }).claudeAiOauth ?? parsed
-
+  const data = (parsed as { claudeAiOauth?: unknown }).claudeAiOauth ?? parsed
   const creds = data as {
     accessToken?: unknown
     refreshToken?: unknown
