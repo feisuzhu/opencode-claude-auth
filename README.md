@@ -15,7 +15,15 @@ macOS is preferred (uses Keychain). Linux and Windows work via the credentials f
 
 ## Installation
 
-One command — install and configure:
+### Install with AI
+
+Paste this into your AI agent (Claude Code, Cursor, Copilot, etc.):
+
+```
+Fetch https://raw.githubusercontent.com/gmartin/opencode-claude-auth/main/installation.md and follow every step exactly as written.
+```
+
+### Manual install
 
 ```bash
 npm install opencode-claude-auth && node -e "
@@ -28,27 +36,7 @@ console.log('Added opencode-claude-auth to', p);
 "
 ```
 
-Or manually:
-
-```bash
-npm install opencode-claude-auth
-```
-
-Then add to your `opencode.json`:
-
-```json
-{
-  "plugin": ["opencode-claude-auth"]
-}
-```
-
-### Install with AI
-
-Paste this into your AI agent (Claude Code, Cursor, Copilot, etc.):
-
-```
-Fetch https://raw.githubusercontent.com/gmartin/opencode-claude-auth/main/installation.md and follow every step exactly as written.
-```
+Or add `"opencode-claude-auth"` to the `plugin` array in your `opencode.json` manually.
 
 ## Usage
 
