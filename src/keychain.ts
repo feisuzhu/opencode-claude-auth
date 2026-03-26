@@ -19,6 +19,28 @@ export interface ClaudeAccount {
 
 const PRIMARY_SERVICE = "Claude Code-credentials"
 
+function readEnvCredentials(): ClaudeCredentials | null {
+  const raw = process.env.ANTHROPIC_OAUTH
+  if (!raw) return null
+
+  const parts = raw.split(",")
+  if (parts.length !== 3) {
+    log("env_credentials_parse", { success: false, reason: "expected 3 comma-separated values" })
+    return null
+  }
+
+  const [accessToken, refreshToken, expiresRaw] = parts
+  const expiresAt = Number(expiresRaw)
+
+  if (!accessToken || !refreshToken || Number.isNaN(expiresAt)) {
+    log("env_credentials_parse", { success: false, reason: "invalid values" })
+    return null
+  }
+
+  log("env_credentials_parse", { success: true })
+  return { accessToken, refreshToken, expiresAt }
+}
+
 function parseCredentials(raw: string): ClaudeCredentials | null {
   let parsed: unknown
   try {
@@ -204,6 +226,12 @@ export function buildAccountLabels(credsList: ClaudeCredentials[]): string[] {
 }
 
 export function readAllClaudeAccounts(): ClaudeAccount[] {
+  const envCreds = readEnvCredentials()
+  if (envCreds) {
+    const [label] = buildAccountLabels([envCreds])
+    return [{ label, source: "env", credentials: envCreds }]
+  }
+
   if (process.platform !== "darwin") {
     const creds = readCredentialsFile()
     if (!creds) return []
@@ -237,6 +265,9 @@ export function readAllClaudeAccounts(): ClaudeAccount[] {
 }
 
 export function refreshAccount(source: string): ClaudeCredentials | null {
+  if (source === "env") {
+    return readEnvCredentials()
+  }
   if (source === "file") {
     return readCredentialsFile()
   }
