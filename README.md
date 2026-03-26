@@ -79,8 +79,9 @@ Just run OpenCode. The plugin handles auth automatically — it reads your Claud
 
 The plugin checks these in order:
 
-1. macOS Keychain (all `Claude Code-credentials*` entries — multiple accounts are detected automatically)
-2. `~/.claude/.credentials.json` (fallback, works on all platforms)
+1. `ANTHROPIC_OAUTH` environment variable (if set, all other sources are skipped)
+2. macOS Keychain (all `Claude Code-credentials*` entries — multiple accounts are detected automatically)
+3. `~/.claude/.credentials.json` (fallback, works on all platforms)
 
 ## Multiple accounts (macOS)
 
@@ -151,6 +152,7 @@ All configurable parameters can be overridden via environment variables. If Anth
 
 | Variable                      | Description                                                                | Default                                                                                                 |
 | ----------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_OAUTH`             | OAuth credentials as `access,refresh,expires` (skips Keychain and file)    | unset                                                                                                   |
 | `ANTHROPIC_CLI_VERSION`       | Claude CLI version for user-agent and billing headers                      | `2.1.80`                                                                                                |
 | `ANTHROPIC_USER_AGENT`        | Full User-Agent string (overrides CLI version)                             | `claude-cli/{version} (external, cli)`                                                                  |
 | `ANTHROPIC_BETA_FLAGS`        | Comma-separated beta feature flags                                         | `claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05` |
@@ -166,6 +168,7 @@ export ANTHROPIC_ENABLE_1M_CONTEXT=true  # requires Claude Max
 
 ## How it works (technical)
 
+- Checks `ANTHROPIC_OAUTH` env var first; if set, uses it directly and skips all other credential sources
 - Registers an `auth.loader` with a custom `fetch` that intercepts all Anthropic API requests
 - Sets `Authorization: Bearer` with fresh OAuth tokens (cached in memory, 30s TTL)
 - Translates tool names between OpenCode and Anthropic API formats (adds/strips `mcp_` prefix)
