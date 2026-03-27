@@ -20,25 +20,15 @@ export interface ClaudeAccount {
 const PRIMARY_SERVICE = "Claude Code-credentials"
 
 function readEnvCredentials(): ClaudeCredentials | null {
-  const raw = process.env.ANTHROPIC_OAUTH
+  const raw = process.env.ANTHROPIC_OAUTH?.trim()
   if (!raw) return null
 
-  const parts = raw.split(",")
-  if (parts.length !== 3) {
-    log("env_credentials_parse", { success: false, reason: "expected 3 comma-separated values" })
-    return null
-  }
-
-  const [accessToken, refreshToken, expiresRaw] = parts
-  const expiresAt = Number(expiresRaw)
-
-  if (!accessToken || !refreshToken || Number.isNaN(expiresAt)) {
-    log("env_credentials_parse", { success: false, reason: "invalid values" })
-    return null
-  }
-
   log("env_credentials_parse", { success: true })
-  return { accessToken, refreshToken, expiresAt }
+  return {
+    accessToken: raw,
+    refreshToken: "",
+    expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
+  }
 }
 
 function parseCredentials(raw: string): ClaudeCredentials | null {

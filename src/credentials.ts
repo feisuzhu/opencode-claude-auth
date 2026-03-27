@@ -183,6 +183,10 @@ export function refreshIfNeeded(
   if (!target) return null
 
   const creds = target.credentials
+
+  // Env-sourced tokens are static access tokens — never refresh
+  if (target.source === "env") return creds
+
   if (creds.expiresAt > Date.now() + 60_000) return creds
 
   refreshViaCli()
