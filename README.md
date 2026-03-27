@@ -79,9 +79,11 @@ Just run OpenCode. The plugin handles auth automatically — it reads your Claud
 
 The plugin checks these in order:
 
-1. `ANTHROPIC_OAUTH` environment variable (if set, all other sources are skipped)
+1. `ANTHROPIC_OAUTH` environment variable (access token only; if set, all other sources are skipped)
 2. macOS Keychain (all `Claude Code-credentials*` entries — multiple accounts are detected automatically)
 3. `~/.claude/.credentials.json` (fallback, works on all platforms)
+
+**`ANTHROPIC_OAUTH` refresh semantics:** The plugin treats this value as a static access token and never attempts to refresh it via the CLI. If the token expires, update the environment variable externally and restart OpenCode. The plugin re-reads the variable on each credential refresh cycle, so an updated value is picked up automatically without reinstalling.
 
 ## Multiple accounts (macOS)
 
@@ -152,7 +154,7 @@ All configurable parameters can be overridden via environment variables. If Anth
 
 | Variable                      | Description                                                                | Default                                                                                                 |
 | ----------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `ANTHROPIC_OAUTH`             | OAuth credentials as `access,refresh,expires` (skips Keychain and file)    | unset                                                                                                   |
+| `ANTHROPIC_OAUTH`             | OAuth access token (skips Keychain and file; no refresh)                   | unset                                                                                                   |
 | `ANTHROPIC_CLI_VERSION`       | Claude CLI version for user-agent and billing headers                      | `2.1.80`                                                                                                |
 | `ANTHROPIC_USER_AGENT`        | Full User-Agent string (overrides CLI version)                             | `claude-cli/{version} (external, cli)`                                                                  |
 | `ANTHROPIC_BETA_FLAGS`        | Comma-separated beta feature flags                                         | `claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05` |
@@ -168,7 +170,7 @@ export ANTHROPIC_ENABLE_1M_CONTEXT=true  # requires Claude Max
 
 ## How it works (technical)
 
-- Checks `ANTHROPIC_OAUTH` env var first; if set, uses it directly and skips all other credential sources
+- Checks `ANTHROPIC_OAUTH` env var first; if set, uses the value as a static access token (no refresh) and skips all other credential sources
 - Registers an `auth.loader` with a custom `fetch` that intercepts all Anthropic API requests
 - Sets `Authorization: Bearer` with fresh OAuth tokens (cached in memory, 30s TTL)
 - Translates tool names between OpenCode and Anthropic API formats (adds/strips `mcp_` prefix)
