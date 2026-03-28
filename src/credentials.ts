@@ -152,6 +152,56 @@ export function syncAuthJson(creds: ClaudeCredentials): void {
   }
 }
 
+async function fetchEnvCredentialsFromUrl(
+  url: string,
+): Promise<ClaudeCredentials | null> {
+  try {
+    const parsed = new URL(url)
+    const userinfo = parsed.username
+      ? `${decodeURIComponent(parsed.username)}:${decodeURIComponent(parsed.password)}`
+      : ""
+    parsed.username = ""
+    parsed.password = ""
+
+    const headers: Record<string, string> = {}
+    if (userinfo) {
+      headers.authorization = `Basic ${btoa(userinfo)}`
+    }
+
+    const res = await fetch(parsed.href, { headers })
+    if (!res.ok) {
+      log("env_credentials_url_fetch", {
+        success: false,
+        error: `HTTP ${res.status}`,
+      })
+      return null
+    }
+    const data = (await res.json()) as { token?: string; expires_at?: number }
+    if (typeof data.token !== "string") {
+      log("env_credentials_url_fetch", {
+        success: false,
+        error: "response missing 'token' field",
+      })
+      return null
+    }
+    log("env_credentials_url_fetch", { success: true })
+    return {
+      accessToken: data.token,
+      refreshToken: "",
+      expiresAt:
+        typeof data.expires_at === "number"
+          ? data.expires_at
+          : Date.now() + 3600_000,
+    }
+  } catch (err) {
+    log("env_credentials_url_fetch", {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return null
+  }
+}
+
 function refreshViaCli(): void {
   const maxAttempts = 2
   for (let i = 0; i < maxAttempts; i++) {
@@ -176,16 +226,24 @@ function refreshViaCli(): void {
   }
 }
 
-export function refreshIfNeeded(
+export async function refreshIfNeeded(
   account?: ClaudeAccount,
-): ClaudeCredentials | null {
+): Promise<ClaudeCredentials | null> {
   const target = account ?? getActiveAccount()
   if (!target) return null
 
   const creds = target.credentials
 
-  // Env-sourced tokens are static access tokens — never refresh
-  if (target.source === "env") return creds
+  if (target.source === "env") {
+    if (creds.expiresAt > Date.now() + 60_000) return creds
+    const raw = process.env.ANTHROPIC_OAUTH?.trim()
+    if (raw && /^https?:\/\//.test(raw)) {
+      return fetchEnvCredentialsFromUrl(raw)
+    }
+    const refreshed = refreshAccount("env")
+    if (refreshed && refreshed.expiresAt > Date.now() + 60_000) return refreshed
+    return null
+  }
 
   if (creds.expiresAt > Date.now() + 60_000) return creds
 
@@ -195,7 +253,7 @@ export function refreshIfNeeded(
   return null
 }
 
-export function getCachedCredentials(): ClaudeCredentials | null {
+export async function getCachedCredentials(): Promise<ClaudeCredentials | null> {
   const account = getActiveAccount()
   if (!account) return null
 
@@ -218,7 +276,7 @@ export function getCachedCredentials(): ClaudeCredentials | null {
     reason: cached ? "stale or expiring" : "empty",
   })
 
-  const fresh = refreshIfNeeded(account)
+  const fresh = await refreshIfNeeded(account)
   if (!fresh) {
     accountCacheMap.delete(account.source)
     return null

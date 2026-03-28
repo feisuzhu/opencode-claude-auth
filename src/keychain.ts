@@ -23,6 +23,16 @@ function readEnvCredentials(): ClaudeCredentials | null {
   const raw = process.env.ANTHROPIC_OAUTH?.trim()
   if (!raw) return null
 
+  if (/^https?:\/\//.test(raw)) {
+    // Return placeholder — actual fetch happens asynchronously via getCachedCredentials
+    log("env_credentials_url_detected", { url: raw })
+    return {
+      accessToken: "",
+      refreshToken: "",
+      expiresAt: 0,
+    }
+  }
+
   log("env_credentials_parse", { success: true })
   return {
     accessToken: raw,

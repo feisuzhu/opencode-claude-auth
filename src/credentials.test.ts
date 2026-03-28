@@ -10,11 +10,11 @@ async function loadCredentialsWithCountingKeychain(
   initialExpiresAt: number,
 ): Promise<{
   credentialsModule: {
-    getCachedCredentials: () => {
+    getCachedCredentials: () => Promise<{
       accessToken: string
       refreshToken: string
       expiresAt: number
-    } | null
+    } | null>
     initAccounts: (accounts: unknown[]) => void
   }
   keychainModule: {
@@ -81,11 +81,11 @@ export function __getReadCount() {
 
   return {
     credentialsModule: credentialsModule as {
-      getCachedCredentials: () => {
+      getCachedCredentials: () => Promise<{
         accessToken: string
         refreshToken: string
         expiresAt: number
-      } | null
+      } | null>
       initAccounts: (accounts: unknown[]) => void
     },
     keychainModule: keychainModule as { __getReadCount: () => number },
@@ -114,8 +114,8 @@ describe("credential caching", () => {
         },
       ])
 
-      const first = credentialsModule.getCachedCredentials()
-      const second = credentialsModule.getCachedCredentials()
+      const first = await credentialsModule.getCachedCredentials()
+      const second = await credentialsModule.getCachedCredentials()
 
       assert.ok(first)
       assert.ok(second)
@@ -147,12 +147,12 @@ describe("credential caching", () => {
         },
       ])
 
-      const first = credentialsModule.getCachedCredentials()
+      const first = await credentialsModule.getCachedCredentials()
       assert.ok(first)
 
       now += 31_000
 
-      const second = credentialsModule.getCachedCredentials()
+      const second = await credentialsModule.getCachedCredentials()
       assert.ok(second)
       assert.equal(second.accessToken, "token")
     } finally {
@@ -164,7 +164,7 @@ describe("credential caching", () => {
     const { credentialsModule } = await loadCredentialsWithCountingKeychain(
       Date.now() + 10 * 60_000,
     )
-    assert.equal(credentialsModule.getCachedCredentials(), null)
+    assert.equal(await credentialsModule.getCachedCredentials(), null)
   })
 })
 

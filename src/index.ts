@@ -181,7 +181,7 @@ const plugin: Plugin = async () => {
     activeSource: defaultAccount.source,
   })
 
-  const initialCreds = getCachedCredentials()
+  const initialCreds = await getCachedCredentials()
   if (initialCreds) {
     syncAuthJson(initialCreds)
   } else {
@@ -191,9 +191,9 @@ const plugin: Plugin = async () => {
   }
 
   // Keep auth.json synced, refreshing via CLI if token is near expiry
-  const syncTimer = setInterval(() => {
+  const syncTimer = setInterval(async () => {
     try {
-      const fresh = getCachedCredentials()
+      const fresh = await getCachedCredentials()
       if (fresh) syncAuthJson(fresh)
     } catch {
       // Non-fatal
@@ -242,7 +242,7 @@ const plugin: Plugin = async () => {
         return {
           apiKey: "",
           async fetch(input: RequestInfo | URL, init?: RequestInit) {
-            const latest = getCachedCredentials()
+            const latest = await getCachedCredentials()
             if (!latest) {
               log("fetch_no_credentials", { modelId: "unknown" })
               throw new Error(
@@ -388,7 +388,7 @@ const plugin: Plugin = async () => {
               accounts[0]
 
             setActiveAccountSource(chosen.source)
-            const creds = getCachedCredentials() ?? chosen.credentials
+            const creds = (await getCachedCredentials()) ?? chosen.credentials
 
             syncAuthJson(creds)
             saveAccountSource(chosen.source)
