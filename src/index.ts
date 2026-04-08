@@ -1,4 +1,4 @@
-import type { Plugin } from "@opencode-ai/plugin"
+import type { Plugin, PluginModule } from "@opencode-ai/plugin"
 import crypto from "node:crypto"
 import { config } from "./model-config.ts"
 import { readAllClaudeAccounts, type ClaudeAccount } from "./keychain.ts"
@@ -449,4 +449,4 @@ const plugin: Plugin = async () => {
 }
 
 export const ClaudeAuthPlugin = plugin
-export default plugin
+export default { id: "opencode-claude-auth", server: plugin } satisfies PluginModule

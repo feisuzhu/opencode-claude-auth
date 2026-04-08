@@ -31,26 +31,10 @@
     "./server": {
       "types": "./dist/index.d.ts",
       "import": "./opencode-claude-auth.js"
-    },
-    "./claude-auth-plugin": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./claude-auth-plugin.js": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./opencode-claude-auth": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./opencode-claude-auth.js": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
     }
   },
   "scripts": {
-    "build": "tsc && cp src/anthropic-prompt.txt dist/",
+    "build": "rm -rf dist && tsc --emitDeclarationOnly && esbuild src/index.ts --bundle --format=esm --platform=node --target=es2022 --outfile=opencode-claude-auth.js",
     "test": "node --test --experimental-strip-types src/**/*.test.ts",
     "test:models": "pnpm run build && node scripts/test-models.ts",
     "intercept": "pnpm run build && node --experimental-strip-types scripts/intercept-claude.ts",
@@ -63,14 +47,15 @@
     "prepublishOnly": "pnpm run build && pnpm test"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "latest",
+    "@opencode-ai/plugin": ">=1.4.0",
     "@types/node": "^25.5.0",
+    "esbuild": "^0.28.0",
     "oxfmt": "0.41.0",
     "oxlint": "1.56.0",
     "typescript": "^5.0.0"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": "*"
+    "@opencode-ai/plugin": ">=1.4.0"
   },
   "packageManager": "pnpm@10.32.1"
 }
