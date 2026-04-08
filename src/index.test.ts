@@ -1,6 +1,5 @@
 import assert from "node:assert/strict"
 import {
-  existsSync,
   writeFileSync,
   mkdirSync,
   readFileSync,
@@ -29,33 +28,6 @@ type TestAuthLoader = (
 ) => Promise<{
   fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 }>
-
-interface Account {
-  label: string
-  source: string
-  credentials: ClaudeCredentials
-}
-
-// Mirrors authorize()'s account-resolution logic
-function resolveAccount(
-  accounts: Account[],
-  selectedSource: string | undefined,
-): Account {
-  const found = accounts.find((a) => a.source === selectedSource)
-  return found ?? accounts[0]
-}
-
-// Mirrors the select prompt options builder
-function buildSelectOptions(
-  accounts: Account[],
-  activeSource: string,
-): Array<{ label: string; value: string; hint: string }> {
-  return accounts.map((a) => ({
-    label: a.label,
-    value: a.source,
-    hint: a.source === activeSource ? `${a.source} (active)` : a.source,
-  }))
-}
 
 // Mirrors syncToPath logic
 function syncToPath(
@@ -97,25 +69,6 @@ function refreshIfNeeded(
   nowMs: number,
 ): "fresh" | "expired" {
   return creds.expiresAt > nowMs + 60_000 ? "fresh" : "expired"
-}
-
-// Mirrors the authorize() callback return shape
-function buildAuthorizeResult(account: Account) {
-  const creds = account.credentials
-  return {
-    url: "",
-    instructions: `Using ${account.label} — credentials loaded from macOS Keychain.`,
-    method: "auto" as const,
-    async callback() {
-      return {
-        type: "success" as const,
-        provider: "anthropic",
-        access: creds.accessToken,
-        refresh: creds.refreshToken,
-        expires: creds.expiresAt,
-      }
-    },
-  }
 }
 
 const SOURCE_FILES = [
@@ -163,15 +116,8 @@ let credentials = {
 
 export function readAllClaudeAccounts() {
   readCount += 1
-  return [{ label: "Account 1", source: "Claude Code-credentials", credentials }]
+  return [{ label: "Account 1", source: "env", credentials }]
 }
-
-export function refreshAccount(source) {
-  readCount += 1
-  return credentials
-}
-
-export function writeBackCredentials() { return true }
 
 export function buildAccountLabels(creds) {
   return creds.map((_, i) => \`Account \${i + 1}\`)
@@ -204,24 +150,6 @@ function makeCreds(overrides?: Partial<ClaudeCredentials>): ClaudeCredentials {
   }
 }
 
-const accounts: Account[] = [
-  {
-    label: "Account 1",
-    source: "Claude Code-credentials",
-    credentials: makeCreds({ accessToken: "at-1" }),
-  },
-  {
-    label: "Account 2",
-    source: "Claude Code-credentials-b28bbb7c",
-    credentials: makeCreds({ accessToken: "at-2" }),
-  },
-  {
-    label: "Account 3",
-    source: "Claude Code-credentials-abc123",
-    credentials: makeCreds({ accessToken: "at-3" }),
-  },
-]
-
 const realFs = {
   existsSync: (p: string) => {
     try {
@@ -249,9 +177,7 @@ describe("exported helpers", () => {
     await copySourceFiles(tempDir)
     await writeFile(
       tempKeychain,
-      `export function readAllClaudeAccounts() { return [{ label: "Account 1", source: "Claude Code-credentials", credentials: { accessToken: "token", refreshToken: "refresh", expiresAt: 1 } }] }
-export function refreshAccount() { return null }
-export function writeBackCredentials() { return true }
+      `export function readAllClaudeAccounts() { return [{ label: "Account 1", source: "env", credentials: { accessToken: "token", refreshToken: "refresh", expiresAt: 1 } }] }
 export function buildAccountLabels(creds) { return creds.map((_, i) => \`Account \${i + 1}\`) }
 `,
       "utf8",
@@ -691,153 +617,6 @@ export function buildAccountLabels(creds) { return creds.map((_, i) => \`Account
   })
 })
 
-describe("auth hook — account resolution", () => {
-  it("defaults to Account 1 when no input is provided", () => {
-    assert.equal(resolveAccount(accounts, undefined).label, "Account 1")
-  })
-
-  it("selects Account 2 by its source key", () => {
-    assert.equal(
-      resolveAccount(accounts, "Claude Code-credentials-b28bbb7c").label,
-      "Account 2",
-    )
-  })
-
-  it("selects Account 3 by its source key", () => {
-    assert.equal(
-      resolveAccount(accounts, "Claude Code-credentials-abc123").label,
-      "Account 3",
-    )
-  })
-
-  it("falls back to Account 1 when source doesn't match any account", () => {
-    assert.equal(
-      resolveAccount(accounts, "Claude Code-credentials-unknown").label,
-      "Account 1",
-    )
-  })
-
-  it("returns the correct credentials for the resolved account", () => {
-    assert.equal(
-      resolveAccount(accounts, "Claude Code-credentials-b28bbb7c").credentials
-        .accessToken,
-      "at-2",
-    )
-  })
-
-  it("works correctly when only one account exists", () => {
-    const single = [
-      {
-        label: "Account 1",
-        source: "Claude Code-credentials",
-        credentials: makeCreds(),
-      },
-    ]
-    assert.equal(resolveAccount(single, undefined).label, "Account 1")
-    assert.equal(resolveAccount(single, "nonexistent").label, "Account 1")
-  })
-})
-
-describe("auth hook — select prompt options", () => {
-  it("builds one option per account", () => {
-    assert.equal(buildSelectOptions(accounts, accounts[0].source).length, 3)
-  })
-
-  it("uses label as display text and source as value", () => {
-    const options = buildSelectOptions(accounts, accounts[0].source)
-    assert.equal(options[0].label, "Account 1")
-    assert.equal(options[0].value, "Claude Code-credentials")
-    assert.equal(options[1].label, "Account 2")
-    assert.equal(options[1].value, "Claude Code-credentials-b28bbb7c")
-  })
-
-  it("marks the active account with (active) in its hint", () => {
-    const options = buildSelectOptions(
-      accounts,
-      "Claude Code-credentials-b28bbb7c",
-    )
-    assert.ok(options[1].hint.includes("(active)"))
-    assert.ok(!options[0].hint.includes("(active)"))
-    assert.ok(!options[2].hint.includes("(active)"))
-  })
-
-  it("shows no prompts when only one account exists", () => {
-    const single = [accounts[0]]
-    const prompts =
-      single.length > 1 ? buildSelectOptions(single, single[0].source) : []
-    assert.deepEqual(prompts, [])
-  })
-
-  it("shows prompts when multiple accounts exist", () => {
-    const prompts =
-      accounts.length > 1
-        ? buildSelectOptions(accounts, accounts[0].source)
-        : []
-    assert.equal(prompts.length, 3)
-  })
-})
-
-describe("auth hook — authorize callback", () => {
-  it("returns url as empty string", () => {
-    assert.equal(buildAuthorizeResult(accounts[0]).url, "")
-  })
-
-  it("returns method: auto", () => {
-    assert.equal(buildAuthorizeResult(accounts[0]).method, "auto")
-  })
-
-  it("instructions mention the chosen account label", () => {
-    assert.ok(
-      buildAuthorizeResult(accounts[1]).instructions.includes("Account 2"),
-    )
-  })
-
-  it("callback returns type: success", async () => {
-    assert.equal(
-      (await buildAuthorizeResult(accounts[0]).callback()).type,
-      "success",
-    )
-  })
-
-  it("callback returns provider: anthropic", async () => {
-    assert.equal(
-      (await buildAuthorizeResult(accounts[0]).callback()).provider,
-      "anthropic",
-    )
-  })
-
-  it("callback returns the account's access token", async () => {
-    assert.equal(
-      (await buildAuthorizeResult(accounts[1]).callback()).access,
-      "at-2",
-    )
-  })
-
-  it("callback returns the account's refresh token", async () => {
-    const account = {
-      label: "Account 1",
-      source: "Claude Code-credentials",
-      credentials: makeCreds({ refreshToken: "rt-specific" }),
-    }
-    assert.equal(
-      (await buildAuthorizeResult(account).callback()).refresh,
-      "rt-specific",
-    )
-  })
-
-  it("callback returns the account's expiry timestamp", async () => {
-    const account = {
-      label: "Account 1",
-      source: "Claude Code-credentials",
-      credentials: makeCreds({ expiresAt: 1700000000000 }),
-    }
-    assert.equal(
-      (await buildAuthorizeResult(account).callback()).expires,
-      1700000000000,
-    )
-  })
-})
-
 describe("syncToPath", () => {
   const tmp = join(tmpdir(), `opencode-test-${process.pid}`)
 
@@ -893,148 +672,6 @@ describe("syncToPath", () => {
     const authPath = join(tmp, "deep", "nested", "auth.json")
     syncToPath(authPath, makeCreds(), realFs)
     assert.ok(JSON.parse(readFileSync(authPath, "utf-8")).anthropic)
-    rmSync(tmp, { recursive: true, force: true })
-  })
-})
-
-function saveAccountSourceTo(stateFile: string, source: string): void {
-  const dir = join(stateFile, "..")
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  writeFileSync(stateFile, source, "utf-8")
-}
-
-function loadPersistedAccountSourceFrom(stateFile: string): string | null {
-  try {
-    if (existsSync(stateFile)) {
-      return readFileSync(stateFile, "utf-8").trim() || null
-    }
-  } catch {
-    // ignore
-  }
-  return null
-}
-
-function resolveStartupAccount(
-  candidateAccounts: Account[],
-  persistedSource: string | null,
-): Account {
-  return (
-    (persistedSource &&
-      candidateAccounts.find((a) => a.source === persistedSource)) ||
-    candidateAccounts[0]
-  )
-}
-
-describe("account persistence — saveAccountSource / loadPersistedAccountSource", () => {
-  const tmp = join(tmpdir(), `opencode-persist-test-${process.pid}`)
-  const stateFile = join(tmp, "claude-account-source.txt")
-
-  it("returns null when the state file does not exist", () => {
-    try {
-      rmSync(stateFile, { force: true })
-    } catch {
-      /* ignore */
-    }
-    assert.equal(loadPersistedAccountSourceFrom(stateFile), null)
-  })
-
-  it("saves and loads the account source correctly", () => {
-    saveAccountSourceTo(stateFile, "Claude Code-credentials-b28bbb7c")
-    assert.equal(
-      loadPersistedAccountSourceFrom(stateFile),
-      "Claude Code-credentials-b28bbb7c",
-    )
-    rmSync(tmp, { recursive: true, force: true })
-  })
-
-  it("overwrites a previously saved source", () => {
-    saveAccountSourceTo(stateFile, "Claude Code-credentials")
-    saveAccountSourceTo(stateFile, "Claude Code-credentials-abc123")
-    assert.equal(
-      loadPersistedAccountSourceFrom(stateFile),
-      "Claude Code-credentials-abc123",
-    )
-    rmSync(tmp, { recursive: true, force: true })
-  })
-
-  it("returns null when the state file is empty", () => {
-    mkdirSync(tmp, { recursive: true })
-    writeFileSync(stateFile, "   ", "utf-8")
-    assert.equal(loadPersistedAccountSourceFrom(stateFile), null)
-    rmSync(tmp, { recursive: true, force: true })
-  })
-})
-
-describe("startup account selection — uses persisted source", () => {
-  it("uses Account 1 when no source is persisted", () => {
-    assert.equal(resolveStartupAccount(accounts, null).label, "Account 1")
-  })
-
-  it("restores Account 2 from persisted source", () => {
-    assert.equal(
-      resolveStartupAccount(accounts, "Claude Code-credentials-b28bbb7c").label,
-      "Account 2",
-    )
-  })
-
-  it("restores Account 3 from persisted source", () => {
-    assert.equal(
-      resolveStartupAccount(accounts, "Claude Code-credentials-abc123").label,
-      "Account 3",
-    )
-  })
-
-  it("falls back to Account 1 when the persisted source no longer exists", () => {
-    assert.equal(
-      resolveStartupAccount(accounts, "Claude Code-credentials-gone").label,
-      "Account 1",
-    )
-  })
-
-  it("restores correct credentials for the persisted account", () => {
-    assert.equal(
-      resolveStartupAccount(accounts, "Claude Code-credentials-b28bbb7c")
-        .credentials.accessToken,
-      "at-2",
-    )
-  })
-})
-
-describe("authorize() — immediate syncAuthJson + saveAccountSource", () => {
-  const tmp = join(tmpdir(), `opencode-authorize-test-${process.pid}`)
-
-  it("auth.json reflects the chosen account immediately after authorize()", () => {
-    mkdirSync(tmp, { recursive: true })
-    const authPath = join(tmp, "auth.json")
-    const stateFile = join(tmp, "claude-account-source.txt")
-
-    const chosen = accounts[1] // Account 2
-    syncToPath(authPath, chosen.credentials, realFs)
-    saveAccountSourceTo(stateFile, chosen.source)
-
-    const written = JSON.parse(readFileSync(authPath, "utf-8"))
-    assert.equal(written.anthropic.access, "at-2")
-    assert.equal(
-      loadPersistedAccountSourceFrom(stateFile),
-      "Claude Code-credentials-b28bbb7c",
-    )
-
-    rmSync(tmp, { recursive: true, force: true })
-  })
-
-  it("a subsequent startup restores the account written by authorize()", () => {
-    mkdirSync(tmp, { recursive: true })
-    const stateFile = join(tmp, "claude-account-source.txt")
-
-    saveAccountSourceTo(stateFile, "Claude Code-credentials-abc123")
-
-    const restored = resolveStartupAccount(
-      accounts,
-      loadPersistedAccountSourceFrom(stateFile),
-    )
-    assert.equal(restored.label, "Account 3")
-    assert.equal(restored.credentials.accessToken, "at-3")
-
     rmSync(tmp, { recursive: true, force: true })
   })
 })

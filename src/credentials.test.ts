@@ -1,6 +1,6 @@
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
-import { refreshViaOAuth, parseOAuthResponse } from "./credentials.ts"
+
 import { chmodSync, mkdirSync, statSync, writeFileSync } from "node:fs"
 import { mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -58,15 +58,8 @@ let credentials = {
 
 export function readAllClaudeAccounts() {
   readCount += 1
-  return [{ label: "Account 1", source: "keychain", credentials }]
+  return [{ label: "Account 1", source: "env", credentials }]
 }
-
-export function refreshAccount(source) {
-  readCount += 1
-  return credentials
-}
-
-export function writeBackCredentials() { return true }
 
 export function __getReadCount() {
   return readCount
@@ -118,7 +111,7 @@ describe("credential caching", () => {
       credentialsModule.initAccounts([
         {
           label: "Account 1",
-          source: "keychain",
+          source: "env",
           credentials: {
             accessToken: "token",
             refreshToken: "refresh",
@@ -151,7 +144,7 @@ describe("credential caching", () => {
       credentialsModule.initAccounts([
         {
           label: "Account 1",
-          source: "keychain",
+          source: "env",
           credentials: {
             accessToken: "token",
             refreshToken: "refresh",
@@ -168,43 +161,6 @@ describe("credential caching", () => {
       const second = await credentialsModule.getCachedCredentials()
       assert.ok(second)
       assert.equal(second.accessToken, "token")
-    } finally {
-      Date.now = originalNow
-    }
-  })
-
-  it("refreshIfNeeded updates account credentials in-place after refresh", async () => {
-    const originalNow = Date.now
-    let now = 1_700_000_000_000
-    Date.now = () => now
-
-    try {
-      // Keychain returns fresh creds with 10min expiry
-      const { credentialsModule } = await loadCredentialsWithCountingKeychain(
-        now + 10 * 60_000,
-      )
-
-      const account = {
-        label: "Account 1",
-        source: "keychain",
-        credentials: {
-          accessToken: "old-token",
-          refreshToken: "old-refresh",
-          expiresAt: now + 30_000, // expires in 30s, below 60s threshold
-        },
-      }
-
-      credentialsModule.initAccounts([account])
-
-      // First call should trigger refresh (token expiring within 60s)
-      const result = credentialsModule.getCachedCredentials()
-      assert.ok(result)
-
-      // The account object's credentials should now be updated in-place
-      assert.ok(
-        account.credentials.expiresAt > now + 60_000,
-        "account.credentials.expiresAt should be updated after refresh",
-      )
     } finally {
       Date.now = originalNow
     }
@@ -229,7 +185,7 @@ describe("credential caching", () => {
       credentialsModule.initAccounts([
         {
           label: "Account 1",
-          source: "keychain",
+          source: "env",
           credentials: {
             accessToken: "token",
             refreshToken: "refresh",
@@ -293,8 +249,6 @@ describe("syncAuthJson file permissions", () => {
       await writeFile(
         tempKeychain,
         `export function readAllClaudeAccounts() { return [] }
-export function refreshAccount() { return null }
-export function writeBackCredentials() { return true }
 export function buildAccountLabels(creds) { return creds.map((_, i) => \`Account \${i + 1}\`) }`,
         "utf8",
       )
@@ -377,8 +331,6 @@ export function buildAccountLabels(creds) { return creds.map((_, i) => \`Account
       await writeFile(
         tempKeychain,
         `export function readAllClaudeAccounts() { return [] }
-export function refreshAccount() { return null }
-export function writeBackCredentials() { return true }
 export function buildAccountLabels(creds) { return creds.map((_, i) => \`Account \${i + 1}\`) }`,
         "utf8",
       )
@@ -415,65 +367,5 @@ export function buildAccountLabels(creds) { return creds.map((_, i) => \`Account
         delete process.env.HOME
       }
     }
-  })
-})
-
-describe("refreshViaOAuth", () => {
-  it("is exported as a function", () => {
-    assert.equal(typeof refreshViaOAuth, "function")
-  })
-})
-
-describe("parseOAuthResponse", () => {
-  const now = 1_700_000_000_000
-  const currentRefresh = "sk-ant-ort01-current"
-
-  it("parses a valid OAuth response with all fields", () => {
-    const raw = JSON.stringify({
-      access_token: "sk-ant-oat01-new",
-      refresh_token: "sk-ant-ort01-new",
-      expires_in: 28800,
-      token_type: "Bearer",
-    })
-    const result = parseOAuthResponse(raw, currentRefresh, now)
-    assert.ok(result)
-    assert.equal(result.accessToken, "sk-ant-oat01-new")
-    assert.equal(result.refreshToken, "sk-ant-ort01-new")
-    assert.equal(result.expiresAt, now + 28800 * 1000)
-  })
-
-  it("returns null when access_token is missing", () => {
-    const raw = JSON.stringify({ refresh_token: "rt", expires_in: 3600 })
-    assert.equal(parseOAuthResponse(raw, currentRefresh, now), null)
-  })
-
-  it("returns null for an error response", () => {
-    const raw = JSON.stringify({ error: "invalid_grant" })
-    assert.equal(parseOAuthResponse(raw, currentRefresh, now), null)
-  })
-
-  it("falls back to current refresh token when response omits it", () => {
-    const raw = JSON.stringify({
-      access_token: "sk-ant-oat01-new",
-      expires_in: 3600,
-    })
-    const result = parseOAuthResponse(raw, currentRefresh, now)
-    assert.ok(result)
-    assert.equal(result.refreshToken, currentRefresh)
-  })
-
-  it("defaults expires_in to 36000s (10h) when missing", () => {
-    const raw = JSON.stringify({ access_token: "sk-ant-oat01-new" })
-    const result = parseOAuthResponse(raw, currentRefresh, now)
-    assert.ok(result)
-    assert.equal(result.expiresAt, now + 36_000 * 1000)
-  })
-
-  it("returns null for invalid JSON", () => {
-    assert.equal(parseOAuthResponse("not json {", currentRefresh, now), null)
-  })
-
-  it("returns null for empty string", () => {
-    assert.equal(parseOAuthResponse("", currentRefresh, now), null)
   })
 })

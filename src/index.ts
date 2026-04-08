@@ -19,9 +19,6 @@ import {
   syncAuthJson,
   initAccounts,
   setActiveAccountSource,
-  loadPersistedAccountSource,
-  saveAccountSource,
-  refreshAccountsList,
   type ClaudeCredentials,
 } from "./credentials.ts"
 
@@ -42,7 +39,6 @@ export {
 export {
   getCachedCredentials,
   syncAuthJson,
-  refreshAccountsList,
   type ClaudeCredentials,
 } from "./credentials.ts"
 export { isEnable1mContext, type PluginSettings } from "./plugin-config.ts"
@@ -175,20 +171,13 @@ const plugin: Plugin = async () => {
 
   initAccounts(accounts)
 
-  const defaultAccountSource = accounts[0]?.source ?? null
-
   if (accounts.length > 0) {
-    const persistedSource = loadPersistedAccountSource()
-    const defaultAccount =
-      (persistedSource && accounts.find((a) => a.source === persistedSource)) ||
-      accounts[0]
-
-    setActiveAccountSource(defaultAccount.source)
+    setActiveAccountSource(accounts[0].source)
 
     log("plugin_init", {
       accountCount: accounts.length,
       sources: accounts.map((a) => a.source),
-      activeSource: defaultAccount.source,
+      activeSource: accounts[0].source,
     })
 
     const initialCreds = await getCachedCredentials()
@@ -196,11 +185,10 @@ const plugin: Plugin = async () => {
       syncAuthJson(initialCreds)
     } else {
       console.warn(
-        "opencode-claude-auth: Claude credentials are expired and could not be refreshed. Run `claude` to re-authenticate.",
+        "opencode-claude-auth: ANTHROPIC_OAUTH credentials expired or invalid.",
       )
     }
 
-    // Keep auth.json synced with current credentials (no refresh triggered)
     const syncTimer = setInterval(() => {
       try {
         const creds = getCredentialsForSync()
@@ -211,9 +199,9 @@ const plugin: Plugin = async () => {
     }, SYNC_INTERVAL)
     syncTimer.unref()
   } else {
-    log("plugin_init_no_accounts", { reason: "no credentials found" })
+    log("plugin_init_no_accounts", { reason: "ANTHROPIC_OAUTH not set" })
     console.warn(
-      "opencode-claude-auth: No Claude Code credentials found. Running in API key mode with transform hook enabled.",
+      "opencode-claude-auth: ANTHROPIC_OAUTH not set. Running in API key mode with transform hook enabled.",
     )
   }
 
@@ -422,55 +410,26 @@ const plugin: Plugin = async () => {
       methods: [
         {
           type: "oauth",
-          label: "Switch Claude Code account",
+          label: "Claude Code (ANTHROPIC_OAUTH)",
 
           get prompts() {
-            const currentAccounts = refreshAccountsList()
-            const currentSource =
-              loadPersistedAccountSource() ?? defaultAccountSource
-            if (currentAccounts.length <= 1) return []
-            return [
-              {
-                type: "select" as const,
-                key: "account",
-                message: "Select which Claude Code account to use:",
-                options: currentAccounts.map((a) => ({
-                  label: a.label,
-                  value: a.source,
-                  hint:
-                    a.source === currentSource
-                      ? `${a.source} (active)`
-                      : a.source,
-                })),
-              },
-            ]
+            return []
           },
 
-          async authorize(inputs) {
-            const latestAccounts = refreshAccountsList()
-
-            const source =
-              inputs?.account ?? latestAccounts[0]?.source ?? accounts[0].source
-            const chosen =
-              latestAccounts.find((a) => a.source === source) ??
-              accounts.find((a) => a.source === source) ??
-              latestAccounts[0] ??
-              accounts[0]
-
-            setActiveAccountSource(chosen.source)
-            const creds = (await getCachedCredentials()) ?? chosen.credentials
+          async authorize() {
+            const creds = await getCachedCredentials()
+            if (!creds) {
+              throw new Error(
+                "ANTHROPIC_OAUTH not set or credentials are invalid.",
+              )
+            }
 
             syncAuthJson(creds)
-            saveAccountSource(chosen.source)
-
-            const sourceDescription =
-              chosen.source === "file"
-                ? "credentials file (~/.claude/.credentials.json)"
-                : "macOS Keychain"
 
             return {
               url: "",
-              instructions: `Using ${chosen.label} — credentials loaded from ${sourceDescription}.`,
+              instructions:
+                "Using credentials from ANTHROPIC_OAUTH environment variable.",
               method: "auto",
               async callback() {
                 return {
