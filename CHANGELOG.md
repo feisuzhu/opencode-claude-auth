@@ -1,5 +1,90 @@
 # Changelog
 
+## [1.4.7](https://github.com/griffinmartin/opencode-claude-auth/compare/v1.4.6...v1.4.7) (2026-04-05)
+
+
+### Bug Fixes
+
+* repair orphaned tool_use/tool_result pairs before API request ([#136](https://github.com/griffinmartin/opencode-claude-auth/issues/136)) ([ceaf742](https://github.com/griffinmartin/opencode-claude-auth/commit/ceaf742c6249a898fcf5617383e6c1a6a71770e5)), closes [#133](https://github.com/griffinmartin/opencode-claude-auth/issues/133)
+
+## [1.4.6](https://github.com/griffinmartin/opencode-claude-auth/compare/v1.4.5...v1.4.6) (2026-04-04)
+
+
+### Bug Fixes
+
+* avoid duplicating cache_control when splitting identity system entry ([#131](https://github.com/griffinmartin/opencode-claude-auth/issues/131)) ([adcfd61](https://github.com/griffinmartin/opencode-claude-auth/commit/adcfd61b62401b82bc65bd34b7b2276ebd89ae2f))
+
+## [1.4.5](https://github.com/griffinmartin/opencode-claude-auth/compare/v1.4.4...v1.4.5) (2026-04-04)
+
+
+### Bug Fixes
+
+* strip effort parameter from request body for haiku models ([#126](https://github.com/griffinmartin/opencode-claude-auth/issues/126)) ([d163938](https://github.com/griffinmartin/opencode-claude-auth/commit/d1639387ca35391c6516f79d7121dad33544f69b))
+* use Object.keys guard for thinking cleanup instead of budget_tokens sentinel ([#129](https://github.com/griffinmartin/opencode-claude-auth/issues/129)) ([174875a](https://github.com/griffinmartin/opencode-claude-auth/commit/174875acbad15b9ea6fc37fdb37872516664ef2d))
+
+## [1.4.4](https://github.com/griffinmartin/opencode-claude-auth/compare/v1.4.3...v1.4.4) (2026-04-03)
+
+
+### Bug Fixes
+
+* exclude interleaved-thinking beta for haiku models ([#120](https://github.com/griffinmartin/opencode-claude-auth/issues/120)) ([de5d806](https://github.com/griffinmartin/opencode-claude-auth/commit/de5d806b995a31d5840c11a0cac1198e08eafbea))
+
+## [1.4.3](https://github.com/griffinmartin/opencode-claude-auth/compare/v1.4.2...v1.4.3) (2026-04-03)
+
+
+### Bug Fixes
+
+* compute CCH signing for billing header, fix system prompt splitting ([#116](https://github.com/griffinmartin/opencode-claude-auth/issues/116)) ([f2e101a](https://github.com/griffinmartin/opencode-claude-auth/commit/f2e101ae241388d3e2e1fd747230d6ce73d34b75))
+
+## [1.4.2](https://github.com/griffinmartin/opencode-claude-auth/compare/v1.4.1...v1.4.2) (2026-03-31)
+
+
+### Bug Fixes
+
+* add missing API request headers for parity with Claude Code ([#109](https://github.com/griffinmartin/opencode-claude-auth/issues/109)) ([5d6455d](https://github.com/griffinmartin/opencode-claude-auth/commit/5d6455da3c41e40f16c65e7378eb31d500da27b7))
+
+## [1.4.1](https://github.com/griffinmartin/opencode-claude-auth/compare/v1.4.0...v1.4.1) (2026-03-31)
+
+
+### Bug Fixes
+
+* register transform hook even when no OAuth accounts exist ([#111](https://github.com/griffinmartin/opencode-claude-auth/issues/111)) ([ac8b780](https://github.com/griffinmartin/opencode-claude-auth/commit/ac8b7808183561b6c7b9fde8bcdb1b930b9993bb))
+
+## [1.4.0](https://github.com/griffinmartin/opencode-claude-auth/compare/v1.3.5...v1.4.0) (2026-03-31)
+
+
+### Features
+
+* config file alternative for 1M context setting ([#90](https://github.com/griffinmartin/opencode-claude-auth/issues/90)) ([d27382f](https://github.com/griffinmartin/opencode-claude-auth/commit/d27382f59b17b172b6c33831e585a25e21ab943f))
+
+## [1.3.5](https://github.com/griffinmartin/opencode-claude-auth/compare/v1.3.4...v1.3.5) (2026-03-31)
+
+
+### Bug Fixes
+
+* eliminate idle token consumption via direct OAuth refresh ([#104](https://github.com/griffinmartin/opencode-claude-auth/issues/104)) ([e7483d7](https://github.com/griffinmartin/opencode-claude-auth/commit/e7483d7108d1d00f4bccc11d540fb375d7361d5f))
+
+## [1.3.4](https://github.com/griffinmartin/opencode-claude-auth/compare/v1.3.3...v1.3.4) (2026-03-30)
+
+
+### Bug Fixes
+
+* add exports["./server"] for opencode 1.3.8 plugin loader compatibility ([#102](https://github.com/griffinmartin/opencode-claude-auth/issues/102)) ([efecefd](https://github.com/griffinmartin/opencode-claude-auth/commit/efecefda9fd7d63b8c42466a6277fc03b0057faa))
+
+## [1.3.3](https://github.com/griffinmartin/opencode-claude-auth/compare/v1.3.2...v1.3.3) (2026-03-27)
+
+
+### Bug Fixes
+
+* run CLI token refresh in tmpdir instead of inheriting cwd ([#96](https://github.com/griffinmartin/opencode-claude-auth/issues/96)) ([7db98a1](https://github.com/griffinmartin/opencode-claude-auth/commit/7db98a1e36fd8ffd775e14c2bd6c4f76c7a141b8))
+
+## [1.3.2](https://github.com/griffinmartin/opencode-claude-auth/compare/v1.3.1...v1.3.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* add logging to refresh failure path for diagnostics ([#94](https://github.com/griffinmartin/opencode-claude-auth/issues/94)) ([5d80a59](https://github.com/griffinmartin/opencode-claude-auth/commit/5d80a59be04fb385941f7c20349746b69b7a2393))
+
 ## [1.3.1](https://github.com/griffinmartin/opencode-claude-auth/compare/v1.3.0...v1.3.1) (2026-03-25)
 
 

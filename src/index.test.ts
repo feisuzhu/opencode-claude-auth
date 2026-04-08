@@ -11,7 +11,6 @@ import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { before, describe, it } from "node:test"
 import { pathToFileURL } from "node:url"
-import { config as modelConfig } from "./model-config.ts"
 
 interface ClaudeCredentials {
   accessToken: string
@@ -123,6 +122,8 @@ const SOURCE_FILES = [
   "index.ts",
   "betas.ts",
   "model-config.ts",
+  "plugin-config.ts",
+  "signing.ts",
   "transforms.ts",
   "credentials.ts",
   "logger.ts",
@@ -169,6 +170,8 @@ export function refreshAccount(source) {
   readCount += 1
   return credentials
 }
+
+export function writeBackCredentials() { return true }
 
 export function buildAccountLabels(creds) {
   return creds.map((_, i) => \`Account \${i + 1}\`)
@@ -248,6 +251,7 @@ describe("exported helpers", () => {
       tempKeychain,
       `export function readAllClaudeAccounts() { return [{ label: "Account 1", source: "Claude Code-credentials", credentials: { accessToken: "token", refreshToken: "refresh", expiresAt: 1 } }] }
 export function refreshAccount() { return null }
+export function writeBackCredentials() { return true }
 export function buildAccountLabels(creds) { return creds.map((_, i) => \`Account \${i + 1}\`) }
 `,
       "utf8",
@@ -271,20 +275,87 @@ export function buildAccountLabels(creds) { return creds.map((_, i) => \`Account
     )
 
     assert.equal(headers.get("authorization"), "Bearer access-token")
+    assert.equal(headers.get("anthropic-version"), "2023-06-01")
     assert.equal(headers.get("x-api-key"), null)
     assert.equal(headers.get("x-custom"), "keep-me")
     assert.ok(headers.get("anthropic-beta")?.includes("custom-beta"))
+    assert.equal(
+      headers.get("x-anthropic-billing-header"),
+      null,
+      "Billing header should not be set as HTTP header (it is injected into system array by transformBody)",
+    )
     assert.ok(
-      headers.get("x-anthropic-billing-header")?.includes("claude-sonnet-4-6"),
+      headers.get("x-client-request-id"),
+      "Expected x-client-request-id to be set",
+    )
+    assert.match(
+      headers.get("x-client-request-id")!,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      "x-client-request-id should be a UUID",
+    )
+    assert.ok(
+      headers.get("x-claude-code-session-id"),
+      "Expected X-Claude-Code-Session-Id to be set",
+    )
+    assert.match(
+      headers.get("x-claude-code-session-id")!,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      "X-Claude-Code-Session-Id should be a UUID",
     )
   })
 
-  it("getBillingHeader includes version and model", () => {
-    const header = helpers.getBillingHeader("claude-opus-4-1")
-    assert.ok(
-      header.includes(`cc_version=${modelConfig.ccVersion}.claude-opus-4-1`),
+  it("x-client-request-id is unique per call", () => {
+    const h1 = helpers.buildRequestHeaders(
+      "https://api.anthropic.com/v1/messages",
+      { headers: {} },
+      "token",
+      "claude-sonnet-4-6",
     )
-    assert.ok(header.includes("cc_entrypoint=cli"))
+    const h2 = helpers.buildRequestHeaders(
+      "https://api.anthropic.com/v1/messages",
+      { headers: {} },
+      "token",
+      "claude-sonnet-4-6",
+    )
+    assert.notEqual(
+      h1.get("x-client-request-id"),
+      h2.get("x-client-request-id"),
+      "Each call should produce a unique x-client-request-id",
+    )
+  })
+
+  it("X-Claude-Code-Session-Id is stable across calls", () => {
+    const h1 = helpers.buildRequestHeaders(
+      "https://api.anthropic.com/v1/messages",
+      { headers: {} },
+      "token",
+      "claude-sonnet-4-6",
+    )
+    const h2 = helpers.buildRequestHeaders(
+      "https://api.anthropic.com/v1/messages",
+      { headers: {} },
+      "token",
+      "claude-sonnet-4-6",
+    )
+    assert.equal(
+      h1.get("x-claude-code-session-id"),
+      h2.get("x-claude-code-session-id"),
+      "Session ID should be stable within the same process",
+    )
+  })
+
+  it("billing header is no longer set as HTTP header", () => {
+    const headers = helpers.buildRequestHeaders(
+      "https://api.anthropic.com/v1/messages",
+      { headers: {} },
+      "token",
+      "claude-opus-4-1",
+    )
+    assert.equal(
+      headers.get("x-anthropic-billing-header"),
+      null,
+      "Billing header moved from HTTP headers to system array",
+    )
   })
 
   it("buildRequestHeaders uses ANTHROPIC_CLI_VERSION for user-agent", () => {
@@ -320,13 +391,25 @@ export function buildAccountLabels(creds) { return creds.map((_, i) => \`Account
     }
   })
 
-  it("getBillingHeader uses ANTHROPIC_CLI_VERSION when set", () => {
+  it("ANTHROPIC_CLI_VERSION overrides version in billing header (via transformBody)", () => {
     process.env.ANTHROPIC_CLI_VERSION = "9.9.9"
     try {
-      const header = helpers.getBillingHeader("claude-opus-4-1")
+      // The billing header is now computed and injected by transformBody,
+      // so we test via transformBody rather than buildRequestHeaders
+      const { transformBody } = helpers
+      const body = JSON.stringify({
+        system: [{ type: "text", text: "test" }],
+        messages: [{ role: "user", content: "hey" }],
+      })
+      const result = transformBody(body)
+      assert.ok(typeof result === "string")
+      const parsed = JSON.parse(result as string) as {
+        system: Array<{ text: string }>
+      }
+      const billing = parsed.system[0].text
       assert.ok(
-        header.includes("cc_version=9.9.9"),
-        `Expected billing header to include 9.9.9, got: ${header}`,
+        billing.includes("cc_version=9.9.9"),
+        `Expected billing header to include 9.9.9, got: ${billing}`,
       )
     } finally {
       delete process.env.ANTHROPIC_CLI_VERSION

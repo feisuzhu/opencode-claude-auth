@@ -1,4 +1,5 @@
 import type { Plugin } from "@opencode-ai/plugin"
+import crypto from "node:crypto"
 import { config } from "./model-config.ts"
 import { readAllClaudeAccounts, type ClaudeAccount } from "./keychain.ts"
 import { initLogger, log } from "./logger.ts"
@@ -11,8 +12,10 @@ import {
   LONG_CONTEXT_BETAS,
 } from "./betas.ts"
 import { transformBody, transformResponseStream } from "./transforms.ts"
+import { applyOpencodeConfig } from "./plugin-config.ts"
 import {
   getCachedCredentials,
+  getCredentialsForSync,
   syncAuthJson,
   initAccounts,
   setActiveAccountSource,
@@ -42,6 +45,13 @@ export {
   refreshAccountsList,
   type ClaudeCredentials,
 } from "./credentials.ts"
+export { isEnable1mContext, type PluginSettings } from "./plugin-config.ts"
+export {
+  buildBillingHeaderValue,
+  computeCch,
+  computeVersionSuffix,
+  extractFirstUserMessageText,
+} from "./signing.ts"
 
 const SYSTEM_IDENTITY_PREFIX =
   "You are Claude Code, Anthropic's official CLI for Claude."
@@ -57,6 +67,9 @@ function getUserAgent(): string {
   )
 }
 
+// Stable per-process session ID, matching Claude Code's X-Claude-Code-Session-Id
+const sessionId = crypto.randomUUID()
+
 type FetchFn = typeof fetch
 
 export async function fetchWithRetry(
@@ -71,6 +84,12 @@ export async function fetchWithRetry(
       const retryAfter = res.headers.get("retry-after")
       const parsed = retryAfter ? parseInt(retryAfter, 10) : NaN
       const delay = Number.isNaN(parsed) ? (i + 1) * 2000 : parsed * 1000
+      log("fetch_rate_limited", {
+        status: res.status,
+        attempt: i + 1,
+        retryAfter: retryAfter ?? "none",
+        delayMs: delay,
+      })
       await new Promise((r) => setTimeout(r, delay))
       continue
     }
@@ -125,18 +144,15 @@ export function buildRequestHeaders(
   ]
 
   headers.set("authorization", `Bearer ${accessToken}`)
+  headers.set("anthropic-version", "2023-06-01")
   headers.set("anthropic-beta", mergedBetas.join(","))
   headers.set("x-app", "cli")
   headers.set("user-agent", getUserAgent())
-  headers.set("x-anthropic-billing-header", getBillingHeader(modelId))
+  headers.set("x-client-request-id", crypto.randomUUID())
+  headers.set("X-Claude-Code-Session-Id", sessionId)
   headers.delete("x-api-key")
 
   return headers
-}
-
-export function getBillingHeader(modelId: string): string {
-  const entrypoint = "cli"
-  return `cc_version=${getCliVersion()}.${modelId}; cc_entrypoint=${entrypoint}; cch=00000;`
 }
 
 const SYNC_INTERVAL = 5 * 60 * 1000 // 5 minutes
@@ -157,51 +173,55 @@ const plugin: Plugin = async () => {
     return {}
   }
 
-  if (accounts.length === 0) {
-    log("plugin_init_no_accounts", { reason: "no credentials found" })
-    console.warn(
-      "opencode-claude-auth: No Claude Code credentials found. " +
-        "Plugin disabled. Run `claude` to authenticate.",
-    )
-    return {}
-  }
-
   initAccounts(accounts)
 
-  const persistedSource = loadPersistedAccountSource()
-  const defaultAccount =
-    (persistedSource && accounts.find((a) => a.source === persistedSource)) ||
-    accounts[0]
+  const defaultAccountSource = accounts[0]?.source ?? null
 
-  setActiveAccountSource(defaultAccount.source)
+  if (accounts.length > 0) {
+    const persistedSource = loadPersistedAccountSource()
+    const defaultAccount =
+      (persistedSource && accounts.find((a) => a.source === persistedSource)) ||
+      accounts[0]
 
-  log("plugin_init", {
-    accountCount: accounts.length,
-    sources: accounts.map((a) => a.source),
-    activeSource: defaultAccount.source,
-  })
+    setActiveAccountSource(defaultAccount.source)
 
-  const initialCreds = await getCachedCredentials()
-  if (initialCreds) {
-    syncAuthJson(initialCreds)
+    log("plugin_init", {
+      accountCount: accounts.length,
+      sources: accounts.map((a) => a.source),
+      activeSource: defaultAccount.source,
+    })
+
+    const initialCreds = await getCachedCredentials()
+    if (initialCreds) {
+      syncAuthJson(initialCreds)
+    } else {
+      console.warn(
+        "opencode-claude-auth: Claude credentials are expired and could not be refreshed. Run `claude` to re-authenticate.",
+      )
+    }
+
+    // Keep auth.json synced with current credentials (no refresh triggered)
+    const syncTimer = setInterval(() => {
+      try {
+        const creds = getCredentialsForSync()
+        if (creds) syncAuthJson(creds)
+      } catch {
+        // Non-fatal
+      }
+    }, SYNC_INTERVAL)
+    syncTimer.unref()
   } else {
+    log("plugin_init_no_accounts", { reason: "no credentials found" })
     console.warn(
-      "opencode-claude-auth: Claude credentials are expired and could not be refreshed via Claude CLI.",
+      "opencode-claude-auth: No Claude Code credentials found. Running in API key mode with transform hook enabled.",
     )
   }
 
-  // Keep auth.json synced, refreshing via CLI if token is near expiry
-  const syncTimer = setInterval(async () => {
-    try {
-      const fresh = await getCachedCredentials()
-      if (fresh) syncAuthJson(fresh)
-    } catch {
-      // Non-fatal
-    }
-  }, SYNC_INTERVAL)
-  syncTimer.unref()
 
   return {
+    config: async (opencodeConfig) => {
+      applyOpencodeConfig(opencodeConfig)
+    },
     "experimental.chat.system.transform": async (input, output) => {
       if (input.model?.providerID !== "anthropic") {
         return
@@ -299,6 +319,31 @@ const plugin: Plugin = async () => {
               retryAttempt: 0,
             })
 
+            // On 401, force a credential refresh and retry once.
+            // This handles the common case of token expiry mid-session.
+            if (response.status === 401) {
+              log("fetch_401_retry", { modelId })
+              const refreshed = await getCachedCredentials()
+              if (refreshed && refreshed.accessToken !== latest.accessToken) {
+                const retryHeaders = buildRequestHeaders(
+                  input,
+                  requestInit,
+                  refreshed.accessToken,
+                  modelId,
+                  excluded,
+                )
+                response = await fetchWithRetry(input, {
+                  ...requestInit,
+                  body,
+                  headers: retryHeaders,
+                })
+                log("fetch_401_retry_result", {
+                  status: response.status,
+                  modelId,
+                })
+              }
+            }
+
             // Check for long-context beta errors and retry with betas excluded
             // Try up to LONG_CONTEXT_BETAS.length times, excluding one more beta each time
             for (
@@ -329,11 +374,13 @@ const plugin: Plugin = async () => {
               })
 
               // Rebuild headers without the excluded beta and retry
+              const currentCreds = await getCachedCredentials()
+              const retryToken = currentCreds?.accessToken ?? latest.accessToken
               const newExcluded = getExcludedBetas(modelId)
               const newHeaders = buildRequestHeaders(
                 input,
                 requestInit,
-                latest.accessToken,
+                retryToken,
                 modelId,
                 newExcluded,
               )
@@ -343,6 +390,29 @@ const plugin: Plugin = async () => {
                 body,
                 headers: newHeaders,
               })
+            }
+
+            // Log non-200 responses at warn level so they're visible in OpenCode
+            if (!response.ok) {
+              const status = response.status
+              const cloned = response.clone()
+              cloned
+                .text()
+                .then((errorBody) => {
+                  let message = errorBody
+                  try {
+                    const parsed = JSON.parse(errorBody) as {
+                      error?: { type?: string; message?: string }
+                    }
+                    message =
+                      parsed.error?.message ?? parsed.error?.type ?? errorBody
+                  } catch {}
+                  log("fetch_error_response", { status, modelId, message })
+                  console.warn(
+                    `opencode-claude-auth: API ${status} for ${modelId}: ${message}`,
+                  )
+                })
+                .catch(() => {})
             }
 
             return transformResponseStream(response)
@@ -357,7 +427,7 @@ const plugin: Plugin = async () => {
           get prompts() {
             const currentAccounts = refreshAccountsList()
             const currentSource =
-              loadPersistedAccountSource() ?? defaultAccount.source
+              loadPersistedAccountSource() ?? defaultAccountSource
             if (currentAccounts.length <= 1) return []
             return [
               {

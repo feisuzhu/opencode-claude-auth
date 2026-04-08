@@ -38,14 +38,61 @@ describe("betas", () => {
     }
   })
 
-  it("getModelBetas includes all baseBetas for haiku", () => {
+  it("getModelBetas includes non-excluded baseBetas for haiku", () => {
     const haikuBetas = getModelBetas("claude-haiku-4-5")
+    const override = getModelOverride("claude-haiku-4-5")
     for (const beta of config.baseBetas) {
-      const override = getModelOverride("claude-haiku-4-5")
-      if (override?.exclude?.includes(beta)) continue
+      if (override?.exclude?.includes(beta)) {
+        assert.ok(
+          !haikuBetas.includes(beta),
+          `haiku should exclude overridden beta: ${beta}`,
+        )
+      } else {
+        assert.ok(
+          haikuBetas.includes(beta),
+          `haiku should include base beta: ${beta}`,
+        )
+      }
+    }
+  })
+
+  it("getModelBetas excludes interleaved-thinking for haiku models", () => {
+    const models = ["claude-haiku-4-5", "claude-haiku-4-5-20251001"]
+    for (const model of models) {
+      const betas = getModelBetas(model)
       assert.ok(
-        haikuBetas.includes(beta),
-        `haiku should include base beta: ${beta}`,
+        !betas.includes("interleaved-thinking-2025-05-14"),
+        `${model} should not include interleaved-thinking beta`,
+      )
+      assert.ok(
+        betas.includes("claude-code-20250219"),
+        `${model} should still include claude-code beta`,
+      )
+      assert.ok(
+        betas.includes("oauth-2025-04-20"),
+        `${model} should still include oauth beta`,
+      )
+    }
+  })
+
+  it("getModelOverride sets disableEffort for haiku models", () => {
+    for (const model of ["claude-haiku-4-5", "claude-haiku-4-5-20251001"]) {
+      const override = getModelOverride(model)
+      assert.ok(override, `${model} should have a model override`)
+      assert.equal(
+        override!.disableEffort,
+        true,
+        `${model} should have disableEffort set`,
+      )
+    }
+  })
+
+  it("getModelOverride does not set disableEffort for non-haiku models", () => {
+    for (const model of ["claude-sonnet-4-6", "claude-opus-4-6"]) {
+      const override = getModelOverride(model)
+      assert.ok(
+        !override?.disableEffort,
+        `${model} should not have disableEffort`,
       )
     }
   })

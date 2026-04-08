@@ -1,6 +1,7 @@
 export interface ModelOverride {
   exclude?: string[]
   add?: string[]
+  disableEffort?: boolean
 }
 
 export interface ModelConfig {
@@ -11,7 +12,7 @@ export interface ModelConfig {
 }
 
 export const config: ModelConfig = {
-  ccVersion: "2.1.80",
+  ccVersion: "2.1.90",
   baseBetas: [
     "claude-code-20250219",
     "oauth-2025-04-20",
@@ -24,6 +25,10 @@ export const config: ModelConfig = {
     "interleaved-thinking-2025-05-14",
   ],
   modelOverrides: {
+    haiku: {
+      exclude: ["interleaved-thinking-2025-05-14"],
+      disableEffort: true,
+    },
     "4-6": {
       add: ["effort-2025-11-24"],
     },
