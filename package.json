@@ -15,26 +15,26 @@
     "url": "git+https://github.com/griffinmartin/opencode-claude-auth.git"
   },
   "files": [
-    "opencode-claude-auth.js",
+    "bundled.js",
     "dist",
     "installation.md"
   ],
   "type": "module",
-  "main": "opencode-claude-auth.js",
-  "module": "opencode-claude-auth.js",
+  "main": "bundled.js",
+  "module": "bundled.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./opencode-claude-auth.js"
+      "import": "./bundled.js"
     },
     "./server": {
       "types": "./dist/index.d.ts",
-      "import": "./opencode-claude-auth.js"
+      "import": "./bundled.js"
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsc --emitDeclarationOnly && esbuild src/index.ts --bundle --format=esm --platform=node --target=es2022 --outfile=opencode-claude-auth.js",
+    "build": "rm -rf dist && tsc --emitDeclarationOnly && esbuild src/index.ts --bundle --format=esm --platform=node --target=es2022 --outfile=bundled.js",
     "test": "node --test --experimental-strip-types src/**/*.test.ts",
     "test:models": "pnpm run build && node scripts/test-models.ts",
     "intercept": "pnpm run build && node --experimental-strip-types scripts/intercept-claude.ts",
