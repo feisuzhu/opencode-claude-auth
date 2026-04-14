@@ -206,30 +206,44 @@ export function transformBody(
       }
     }
 
+    // Anthropic's OAuth billing validation rejects certain tool names when
+    // multiple tools are present. Skip blanket mcp_ prefixing and only
+    // rename the specific blocked names to safe alternatives.
+    const BLOCKED_TOOL_NAMES: Record<string, string> = {
+      "todowrite": "TodoWrite",
+      "background_output": "backgroundOutput",
+      "background_cancel": "backgroundCancel",
+    }
     if (Array.isArray(parsed.tools)) {
-      parsed.tools = parsed.tools.map((tool) => ({
-        ...tool,
-        name: tool.name ? `${TOOL_PREFIX}${tool.name}` : tool.name,
-      }))
+      parsed.tools = parsed.tools.map((tool) => {
+        if (typeof tool.name === "string" && BLOCKED_TOOL_NAMES[tool.name]) {
+          return { ...tool, name: BLOCKED_TOOL_NAMES[tool.name] }
+        }
+        return tool
+      })
     }
 
     if (Array.isArray(parsed.messages)) {
       parsed.messages = parsed.messages.map((message) => {
-        if (!Array.isArray(message.content)) {
-          return message
-        }
-
+        if (!Array.isArray(message.content)) return message
+        const hasBlocked = message.content.some(
+          (block) =>
+            block.type === "tool_use" &&
+            typeof block.name === "string" &&
+            BLOCKED_TOOL_NAMES[block.name],
+        )
+        if (!hasBlocked) return message
         return {
           ...message,
           content: message.content.map((block) => {
-            if (block.type !== "tool_use" || typeof block.name !== "string") {
-              return block
+            if (
+              block.type === "tool_use" &&
+              typeof block.name === "string" &&
+              BLOCKED_TOOL_NAMES[block.name]
+            ) {
+              return { ...block, name: BLOCKED_TOOL_NAMES[block.name] }
             }
-
-            return {
-              ...block,
-              name: `${TOOL_PREFIX}${block.name}`,
-            }
+            return block
           }),
         }
       })
@@ -246,7 +260,11 @@ export function transformBody(
 }
 
 export function stripToolPrefix(text: string): string {
-  return text.replace(/"name"\s*:\s*"mcp_([^"]+)"/g, '"name": "$1"')
+  return text
+    .replace(/"name"\s*:\s*"mcp_([^"]+)"/g, '"name": "$1"')
+    .replace(/"name"\s*:\s*"TodoWrite"/g, '"name": "todowrite"')
+    .replace(/"name"\s*:\s*"backgroundOutput"/g, '"name": "background_output"')
+    .replace(/"name"\s*:\s*"backgroundCancel"/g, '"name": "background_cancel"')
 }
 
 export function transformResponseStream(response: Response): Response {
