@@ -16,6 +16,11 @@ export type { ClaudeAccount } from "./keychain.ts"
 
 const CREDENTIAL_CACHE_TTL_MS = 30_000
 
+function isOAuthUrl(): boolean {
+  const raw = process.env.ANTHROPIC_OAUTH?.trim()
+  return !!raw && /^https?:\/\//.test(raw)
+}
+
 const accountCacheMap = new Map<
   string,
   { creds: ClaudeCredentials; cachedAt: number }
@@ -164,15 +169,7 @@ export async function refreshIfNeeded(
   const target = account ?? getActiveAccount()
   if (!target) return null
 
-  const creds = target.credentials
-  if (creds.expiresAt > Date.now() + 60_000) return creds
-
-  log("refresh_needed", {
-    source: target.source,
-    expiresAt: creds.expiresAt,
-    expiresIn: creds.expiresAt - Date.now(),
-  })
-
+  // When ANTHROPIC_OAUTH is a URL, always fetch fresh (ignore expiry/cache)
   const raw = process.env.ANTHROPIC_OAUTH?.trim()
   if (raw && /^https?:\/\//.test(raw)) {
     const fetched = await fetchEnvCredentialsFromUrl(raw)
@@ -181,6 +178,15 @@ export async function refreshIfNeeded(
       return fetched
     }
   }
+
+  const creds = target.credentials
+  if (creds.expiresAt > Date.now() + 60_000) return creds
+
+  log("refresh_needed", {
+    source: target.source,
+    expiresAt: creds.expiresAt,
+    expiresIn: creds.expiresAt - Date.now(),
+  })
 
   if (raw) {
     const fresh: ClaudeCredentials = {
@@ -213,22 +219,26 @@ export async function getCachedCredentials(): Promise<ClaudeCredentials | null> 
   if (!account) return null
 
   const now = Date.now()
-  const cached = accountCacheMap.get(account.source)
-  if (
-    cached &&
-    now - cached.cachedAt < CREDENTIAL_CACHE_TTL_MS &&
-    cached.creds.expiresAt > now + 60_000
-  ) {
-    log("cache_hit", {
-      source: account.source,
-      ttlRemaining: CREDENTIAL_CACHE_TTL_MS - (now - cached.cachedAt),
-    })
-    return cached.creds
+  const urlMode = isOAuthUrl()
+
+  if (!urlMode) {
+    const cached = accountCacheMap.get(account.source)
+    if (
+      cached &&
+      now - cached.cachedAt < CREDENTIAL_CACHE_TTL_MS &&
+      cached.creds.expiresAt > now + 60_000
+    ) {
+      log("cache_hit", {
+        source: account.source,
+        ttlRemaining: CREDENTIAL_CACHE_TTL_MS - (now - cached.cachedAt),
+      })
+      return cached.creds
+    }
   }
 
   log("cache_miss", {
     source: account.source,
-    reason: cached ? "stale or expiring" : "empty",
+    reason: urlMode ? "url_mode_force_fetch" : "stale or expiring",
   })
 
   const fresh = await refreshIfNeeded(account)
