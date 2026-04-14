@@ -3,6 +3,22 @@ import { config, getModelOverride } from "./model-config.ts"
 
 const TOOL_PREFIX = "mcp_"
 
+/**
+ * Prefix a tool name with TOOL_PREFIX and uppercase the first character.
+ * Claude Code uses PascalCase tool names (e.g. mcp_Bash, mcp_Read);
+ * lowercase names (mcp_bash, mcp_read) are flagged as non-Claude-Code clients.
+ */
+function prefixName(name: string): string {
+  return `${TOOL_PREFIX}${name.charAt(0).toUpperCase()}${name.slice(1)}`
+}
+
+/**
+ * Reverse prefixName: strip TOOL_PREFIX and restore the original leading case.
+ */
+function unprefixName(name: string): string {
+  return `${name.charAt(0).toLowerCase()}${name.slice(1)}`
+}
+
 const SYSTEM_IDENTITY =
   "You are Claude Code, Anthropic's official CLI for Claude."
 
@@ -206,44 +222,30 @@ export function transformBody(
       }
     }
 
-    // Anthropic's OAuth billing validation rejects certain tool names when
-    // multiple tools are present. Skip blanket mcp_ prefixing and only
-    // rename the specific blocked names to safe alternatives.
-    const BLOCKED_TOOL_NAMES: Record<string, string> = {
-      "todowrite": "TodoWrite",
-      "background_output": "backgroundOutput",
-      "background_cancel": "backgroundCancel",
-    }
+    // Anthropic's OAuth billing validation rejects lowercase tool names
+    // when multiple tools are present. Claude Code uses PascalCase after
+    // the mcp_ prefix (e.g. mcp_Bash, mcp_Read). Apply the same convention.
     if (Array.isArray(parsed.tools)) {
-      parsed.tools = parsed.tools.map((tool) => {
-        if (typeof tool.name === "string" && BLOCKED_TOOL_NAMES[tool.name]) {
-          return { ...tool, name: BLOCKED_TOOL_NAMES[tool.name] }
-        }
-        return tool
-      })
+      parsed.tools = parsed.tools.map((tool) => ({
+        ...tool,
+        name: tool.name ? prefixName(tool.name) : tool.name,
+      }))
     }
 
     if (Array.isArray(parsed.messages)) {
       parsed.messages = parsed.messages.map((message) => {
-        if (!Array.isArray(message.content)) return message
-        const hasBlocked = message.content.some(
-          (block) =>
-            block.type === "tool_use" &&
-            typeof block.name === "string" &&
-            BLOCKED_TOOL_NAMES[block.name],
-        )
-        if (!hasBlocked) return message
+        if (!Array.isArray(message.content)) {
+          return message
+        }
+
         return {
           ...message,
           content: message.content.map((block) => {
-            if (
-              block.type === "tool_use" &&
-              typeof block.name === "string" &&
-              BLOCKED_TOOL_NAMES[block.name]
-            ) {
-              return { ...block, name: BLOCKED_TOOL_NAMES[block.name] }
+            if (block.type !== "tool_use" || typeof block.name !== "string") {
+              return block
             }
-            return block
+
+            return { ...block, name: prefixName(block.name) }
           }),
         }
       })
@@ -260,11 +262,10 @@ export function transformBody(
 }
 
 export function stripToolPrefix(text: string): string {
-  return text
-    .replace(/"name"\s*:\s*"mcp_([^"]+)"/g, '"name": "$1"')
-    .replace(/"name"\s*:\s*"TodoWrite"/g, '"name": "todowrite"')
-    .replace(/"name"\s*:\s*"backgroundOutput"/g, '"name": "background_output"')
-    .replace(/"name"\s*:\s*"backgroundCancel"/g, '"name": "background_cancel"')
+  return text.replace(
+    /"name"\s*:\s*"mcp_([^"]+)"/g,
+    (_match, name: string) => `"name": "${unprefixName(name)}"`,
+  )
 }
 
 export function transformResponseStream(response: Response): Response {

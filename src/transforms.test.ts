@@ -8,7 +8,7 @@ import {
 } from "./transforms.ts"
 
 describe("transforms", () => {
-  it("transformBody moves non-core system text to user message and preserves tool names", () => {
+  it("transformBody moves non-core system text to user message and PascalCase-prefixes tool names", () => {
     const input = JSON.stringify({
       system: [{ type: "text", text: "OpenCode and opencode" }],
       tools: [{ name: "search" }],
@@ -36,8 +36,8 @@ describe("transforms", () => {
     // The original system text should now be prepended to the first user message
     assert.equal(parsed.messages[0].content[0].type, "text")
     assert.equal(parsed.messages[0].content[0].text, "OpenCode and opencode")
-    assert.equal(parsed.tools[0].name, "search")
-    assert.equal(parsed.messages[0].content[1].name, "lookup")
+    assert.equal(parsed.tools[0].name, "mcp_Search")
+    assert.equal(parsed.messages[0].content[1].name, "mcp_Lookup")
   })
 
   it("transformBody relocates non-core system text to user message", () => {
@@ -449,21 +449,20 @@ describe("transforms", () => {
     assert.equal(parsed.thinking, undefined)
   })
 
-  it("transformBody renames blocked tool names", () => {
+  it("transformBody PascalCase-prefixes tool names with mcp_", () => {
     const input = JSON.stringify({
       system: [],
       tools: [
-        { name: "todowrite" },
-        { name: "background_output" },
-        { name: "background_cancel" },
         { name: "bash" },
+        { name: "read" },
+        { name: "background_output" },
       ],
       messages: [
         {
           role: "user",
           content: [
-            { type: "tool_use", name: "background_output" },
             { type: "tool_use", name: "bash" },
+            { type: "tool_use", name: "background_output" },
           ],
         },
       ],
@@ -477,26 +476,21 @@ describe("transforms", () => {
       }>
     }
 
-    assert.equal(parsed.tools[0].name, "TodoWrite")
-    assert.equal(parsed.tools[1].name, "backgroundOutput")
-    assert.equal(parsed.tools[2].name, "backgroundCancel")
-    assert.equal(parsed.tools[3].name, "bash")
-    assert.equal(parsed.messages[0].content[0].name, "backgroundOutput")
-    assert.equal(parsed.messages[0].content[1].name, "bash")
+    assert.equal(parsed.tools[0].name, "mcp_Bash")
+    assert.equal(parsed.tools[1].name, "mcp_Read")
+    assert.equal(parsed.tools[2].name, "mcp_Background_output")
+    assert.equal(parsed.messages[0].content[0].name, "mcp_Bash")
+    assert.equal(parsed.messages[0].content[1].name, "mcp_Background_output")
   })
 
-  it("stripToolPrefix reverses blocked tool name renames", () => {
+  it("stripToolPrefix reverses PascalCase mcp_ prefix", () => {
     assert.equal(
-      stripToolPrefix('{"name": "TodoWrite"}'),
-      '{"name": "todowrite"}',
+      stripToolPrefix('{"name": "mcp_Bash"}'),
+      '{"name": "bash"}',
     )
     assert.equal(
-      stripToolPrefix('{"name": "backgroundOutput"}'),
+      stripToolPrefix('{"name": "mcp_Background_output"}'),
       '{"name": "background_output"}',
-    )
-    assert.equal(
-      stripToolPrefix('{"name": "backgroundCancel"}'),
-      '{"name": "background_cancel"}',
     )
   })
 
